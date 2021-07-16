@@ -378,9 +378,11 @@ function Set-vCenterCertificate {
     .PARAMETER Server
         CisServer Connection.  Uses $Global:DefatultCisServer[0] by default
     .PARAMETER Certificate
-        PEM encoded certificate file
+        PEM encoded machine certificate 
+    .PARAMETER RootCert
+        PEM encoded certificate chain up to the trust anchor (root certificate)
     .PARAMETER Key
-        PEM encoded RSA Key file in PKCS8 format.  Not required if CSR used to generate certificate was created by VCSA  
+        PEM encoded RSA Key file in PKCS8 format.  Not required if CSR used to generate certificate was created by VCSA
     .PARAMETER Renew
         Renews the VECS generated default certificate
     .PARAMETER Duration
@@ -427,6 +429,22 @@ function Set-vCenterCertificate {
         })]         
         [System.IO.FileInfo]
         $Key,
+
+        [Parameter(ParameterSetName="Replace")]
+        [ValidateScript({
+            if(-Not ($_ | Test-Path -PathType Leaf) ){
+                throw "The Path argument must be a file"
+            }
+            try{
+                #Test if this is a valid certificate file
+                New-Object System.Security.Cryptography.X509Certificates.X509Certificate2((Resolve-Path -Path $_).Path)
+            } catch {
+                throw "File is not a valid certificate"
+            }
+            return $true
+        })]         
+        [System.IO.FileInfo]
+        $RootCert,
 
         [Parameter(ParameterSetName="Renew")]
         [Switch]
@@ -488,6 +506,26 @@ function Set-vCenterCertificate {
                             }
                             default {
                                 $KeyString.Append($Line) | Out-Null
+                            }
+                        }
+                    }
+                }
+                if($RootCert) {
+                    $RootCertFile = Get-Content -Path $RootCert
+                    foreach($Line in $RootCertFile) {
+                        switch -Regex ($Line) {
+                            $BeginRootCertString {
+                                $RootChain = New-Object System.Text.StringBuilder
+                                $RootChain.Append($Line) | Out-Null
+                                $RootChain.Append('\n') | Out-Null
+                            }
+                            $EndRootCertString {
+                                $RootChain.Append('\n')  | Out-Null
+                                $RootChain.Append($Line) | Out-Null
+                                $Body.spec.root_cert = $RootChain.ToString()
+                            }
+                            default {
+                                $RootChain.Append($Line) | Out-Null
                             }
                         }
                     }
